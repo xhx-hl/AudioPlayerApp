@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="teal">#26A69A</color>
+    <color name="teal_dark">#00897B</color>
+    <color name="bg">#121212</color>
+    <color name="surface">#1E1E1E</color>
+    <color name="text">#E0E0E0</color>
+    <color name="folder_bg">#2A2A2A</color>
+    <color name="folder_sel">#26A69A</color>
+</resources>

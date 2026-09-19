@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>未央音频播放器</title>
+<style>
+  :root{ --bg:#121212; --surface:#1e1e1e; --teal:#26a69a; --text:#e0e0e0; }
+  *{ box-sizing:border-box; }
+  body{ margin:0; background:var(--bg); color:var(--text);
+        font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif; }
+  header{ background:var(--teal); color:#fff; padding:12px 14px; font-size:17px; font-weight:600;
+          position:sticky; top:0; z-index:5; }
+  #folders{ display:flex; overflow-x:auto; gap:8px; padding:8px; background:var(--surface); }
+  .fold{ flex:0 0 auto; padding:8px 12px; background:#2a2a2a; border-radius:18px; font-size:14px; }
+  .fold.sel{ background:var(--teal); color:#fff; }
+  #files{ padding:6px 10px 160px; }
+  .file{ padding:12px 12px; border-bottom:1px solid #2a2a2a; font-size:15px; }
+  .file.cur{ color:var(--teal); font-weight:600; }
+  #bar{ position:fixed; left:0; right:0; bottom:0; background:var(--surface);
+        padding:10px 12px calc(10px + env(safe-area-inset-bottom)); box-shadow:0 -2px 10px #0008; }
+  #title{ font-size:15px; margin-bottom:6px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .row{ display:flex; align-items:center; gap:8px; }
+  .row.seek{ margin:6px 0; }
+  button{ background:#2a2a2a; color:#fff; border:0; border-radius:10px; padding:10px 12px;
+          font-size:18px; min-width:46px; }
+  button:active{ background:var(--teal); }
+  .ctr{ display:flex; justify-content:space-around; }
+  #seek{ flex:1; }
+  .small{ font-size:12px; color:#aaa; min-width:42px; text-align:center; }
+  #pick{ position:fixed; inset:0; display:flex; align-items:center; justify-content:center;
+         background:var(--bg); padding:24px; text-align:center; }
+  #pick div{ max-width:340px; }
+  #pick button{ font-size:16px; margin-top:16px; }
+  #sleep{ color:var(--teal); font-size:12px; min-width:auto; }
+</style>
+</head>
+<body>
+<header>未央音频播放器</header>
+
+<div id="pick"><div>
+  <div>本播放器完全离线，不联网。<br>首次请选择存放音频的<b>根文件夹</b>（里面是任意数量的子目录，每目录放若干音频）。</div>
+  <button onclick="pickFolder()">📁 选择音频文件夹</button>
+  <div style="margin-top:14px;font-size:12px;color:#888">安卓 Chrome 支持"永久访问"；下次打开不用重选。</div>
+</div></div>
+
+<div id="folders"></div>
+<div id="files"></div>
+
+<div id="bar" style="display:none">
+  <div id="title">未播放</div>
+  <div class="row seek">
+    <span class="small" id="cur">0:00</span>
+    <input id="seek" type="range" min="0" max="100" value="0">
+    <span class="small" id="dur">0:00</span>
+  </div>
+  <div class="ctr">
+    <button id="prev">⏮</button>
+    <button id="play">▶</button>
+    <button id="next">⏭</button>
+    <button id="speed">1×</button>
+    <button id="loop">🔁</button>
+    <button id="sleep">⏱</button>
+    <button id="fav">☆</button>
+  </div>
+</div>
+
+<audio id="audio"></audio>
+
+<script>
+const audio = document.getElementById('audio');
+const $ = id => document.getElementById(id);
+const SPEEDS = [0.5,0.75,1,1.25,1.5,2];
+let speedIdx = 2, repeatMode = 0;            // 0顺序 1单曲 2列表 3随机
+let folders = [], curFolder = 0, curItem = -1, dirHandle = null;
+let sleepEnd = 0, sleepTimer = null;
+
+const isAudio = n => /\.(mp3|m4a|aac|wav|flac|ogg|wma|opus|amr)$/i.test(n);
+
+// ---------- 选文件夹 ----------
+let fileInput=null;
+async function pickFolder(){
+  if(window.showDirectoryPicker){
+    try{
+      dirHandle = await window.showDirectoryPicker();
+      await saveHandle(dirHandle);
+      $('pick').style.display='none'; $('bar').style.display='block';
+      await loadTree(); restoreLast(); return;
+    }catch(e){ /* 用户取消，忽略 */ }
+  }
+  // 回退：用「选择多个文件」(webkitdirectory)，兼容更多浏览器
+  if(!fileInput){
+    fileInput=document.createElement('input');
+    fileInput.type='file'; fileInput.multiple=true; fileInput.webkitdirectory=true;
+    fileInput.onchange=ev=>{
+      const list=ev.target.files; if(!list||!list.length) return;
+      loadFromFiles(list);
+      $('pick').style.display='none'; $('bar').style.display='block'; restoreLast();
+    };
+  }
+  fileInput.click();
+}
+// 从文件选择器（webkitdirectory）解析出目录结构
+function loadFromFiles(list){
+  const map={};
+  for(const f of list){
+    if(!isAudio(f.name)) continue;
+    const parts=(f.webkitRelativePath||f.name).split('/');
+    const folder = parts.length>2 ? parts[1] : '（根目录音频）';
+    (map[folder]=map[folder]||[]).push({name:f.name, file:f});
+  }
+  folders=Object.entries(map).map(([name,items])=>({name,items}));
+  folders.forEach(f=>f.items.sort((a,b)=>a.name.localeCompare(b.name,'zh')));
+  folders.sort((a,b)=>a.name.localeCompare(b.name,'zh'));
+  dirHandle=null;
+  renderFolders(); renderFiles();
+}
+async function saveHandle(h){ const db=await idb(); db.put('h','dir',h); }
+async function loadHandle(){ const db=await idb(); return await db.get('h','dir'); }
+function idb(){ return new Promise((res,rej)=>{ const r=indexedDB.open('audioplayer');
+  r.onsuccess=e=>{ const db=e.target.result; res({ get:(s,k)=>new Promise(r2=>{const t=db.transaction(s,'readonly').objectStore(s).get(k);t.onsuccess=()=>r2(t.result);}), put:(s,k,v)=>new Promise(r2=>{const t=db.transaction(s,'readwrite').objectStore(s).put(v,k);t.onsuccess=()=>r2();}) }); };
+  r.onupgradeneeded=e=>{ e.target.result.createObjectStore('h'); };
+  r.onerror=rej; }); }
+
+// ---------- 读取目录树（任意数量的子目录） ----------
+async function loadTree(){
+  folders = [];
+  for await (const [name, h] of dirHandle.entries()){
+    if(h.kind === 'directory'){
+      const items = [];
+      for await (const [n, f] of h.entries()){
+        if(f.kind === 'file' && isAudio(n)) items.push({ name:n, handle:f });
+      }
+      items.sort((a,b)=>a.name.localeCompare(b.name,'zh'));
+      if(items.length) folders.push({ name, items });
+    }
+  }
+  folders.sort((a,b)=>a.name.localeCompare(b.name,'zh'));
+  renderFolders();
+  if(folders[curFolder]) renderFiles();
+}
+function renderFolders(){
+  $('folders').innerHTML='';
+  folders.forEach((f,i)=>{
+    const d=document.createElement('div');
+    d.className='fold'+(i===curFolder?' sel':'');
+    d.textContent=`${f.name} (${f.items.length})`;
+    d.onclick=()=>{ curFolder=i; renderFolders(); renderFiles(); };
+    $('folders').appendChild(d);
+  });
+}
+function renderFiles(){
+  const f=folders[curFolder]; if(!f) return;
+  $('files').innerHTML='';
+  f.items.forEach((it,i)=>{
+    const d=document.createElement('div');
+    d.className='file'+(i===curItem?' cur':'');
+    d.textContent=it.name;
+    d.onclick=()=>play(i);
+    $('files').appendChild(d);
+  });
+}
+
+// ---------- 播放 ----------
+async function playFile(item){
+  const file = item.handle ? await item.handle.getFile() : item.file;
+  audio.src=URL.createObjectURL(file); audio.play(); }
+async function play(i){
+  const f=folders[curFolder]; if(!f||!f.items[i]) return;
+  curItem=i; renderFiles(); $('title').textContent=f.items[i].name; setMSMeta();
+  await playFile(f.items[i]); saveLast();
+}
+function playlist(){ // 当前文件夹的文件列表（随机时打乱）
+  const f=folders[curFolder]; if(!f) return [];
+  const arr=f.items.map((_,i)=>i);
+  if(repeatMode===3) for(let i=arr.length-1;i>0;i--){const j=(Math.random()*(i+1))|0;[arr[i],arr[j]]=[arr[j],arr[i]];}
+  return arr;
+}
+let order = [];
+function next(){
+  if(!folders[curFolder]) return;
+  if(order.length===0) order=playlist();
+  let pos=order.indexOf(curItem);
+  pos = (pos+1) % order.length;
+  play(order[pos]);
+}
+function prev(){
+  if(!folders[curFolder]) return;
+  if(order.length===0) order=playlist();
+  let pos=order.indexOf(curItem);
+  pos = (pos-1+order.length) % order.length;
+  play(order[pos]);
+}
+
+// ---------- 控制 ----------
+$('play').onclick=()=>{ if(audio.paused) audio.play(); else audio.pause(); };
+$('next').onclick=next;
+$('prev').onclick=prev;
+audio.onplay =()=>{ $('play').textContent='⏸'; setMSMeta(); };
+audio.onpause=()=>{ $('play').textContent='▶'; setMSMeta(); };
+audio.onended=()=>{ if(repeatMode===1){ audio.currentTime=0; audio.play(); } else next(); };
+audio.ontimeupdate=()=>{ $('seek').value=(audio.currentTime/audio.duration*100)||0;
+  $('cur').textContent=fmt(audio.currentTime); };
+audio.onloadedmetadata=()=>{ $('dur').textContent=fmt(audio.duration); setMSMeta(); setMSPos(); };
+$('seek').onchange=()=>{ audio.currentTime=audio.duration*$('seek').value/100; };
+
+$('speed').onclick=()=>{ speedIdx=(speedIdx+1)%SPEEDS.length; audio.playbackRate=SPEEDS[speedIdx];
+  $('speed').textContent=fmtS(SPEEDS[speedIdx]); };
+$('loop').onclick=()=>{ repeatMode=(repeatMode+1)%4; order=[];
+  $('loop').textContent=['🔁','🔂','🔁','🔀'][repeatMode]; };
+
+$('sleep').onclick=()=>{ const m=[15,30,45,60,90,0][prompt('睡眠定时（分钟，0=关闭）','30')|0];
+  clearInterval(sleepTimer); if(!m){ $('sleep').textContent='⏱'; return; }
+  sleepEnd=Date.now()+m*60000; $('sleep').textContent='⏱'+(m);
+  sleepTimer=setInterval(()=>{ if(Date.now()>=sleepEnd){ audio.pause(); clearInterval(sleepTimer); $('sleep').textContent='⏱'; } },1000); };
+
+$('fav').onclick=()=>{ const key=lastKey(); if(!key) return;
+  let s=new Set(JSON.parse(localStorage.getItem('favs')||'[]'));
+  if(s.has(key)) s.delete(key); else s.add(key);
+  localStorage.setItem('favs',JSON.stringify([...s]));
+  $('fav').textContent=s.has(key)?'★':'☆'; };
+
+// ---------- 进度记忆 ----------
+function fmt(t){ if(!t||isNaN(t)) return '0:00'; t=Math.floor(t);
+  const h=t/3600|0,m=(t%3600)/60|0,s=t%60; return h>0?`${h}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`:`${m}:${String(s).padStart(2,'0')}`; }
+function fmtS(s){ return (s%1===0?s.toFixed(0):s.toFixed(2).replace(/0$/,''))+'×'; }
+function lastKey(){ const f=folders[curFolder]; return f&&curItem>=0?`${f.name}/${f.items[curItem].name}`:''; }
+function saveLast(){ localStorage.setItem('last', JSON.stringify({folder:folders[curFolder]?.name, item:curItem, t:audio.currentTime})); }
+function restoreLast(){
+  try{ const j=JSON.parse(localStorage.getItem('last')||'null'); if(!j) return;
+    const fi=folders.findIndex(f=>f.name===j.folder); if(fi<0) return;
+    curFolder=fi; renderFolders(); curItem=j.item; renderFiles();
+    $('title').textContent=folders[fi].items[j.item].name;
+    audio.addEventListener('loadedmetadata',()=>audio.currentTime=j.t,{once:true});
+    playFile(folders[fi].items[j.item]); audio.pause();
+  }catch(e){}
+}
+audio.ontimeupdate=()=>{ $('seek').value=(audio.duration?audio.currentTime/audio.duration*100:0);
+  $('cur').textContent=fmt(audio.currentTime); if(audio.currentTime>0) saveLast(); setMSPos(); };
+
+// 锁屏 / 后台媒体控制（Media Session API，Chrome Android 支持）
+function setMSMeta(){
+  if(!('mediaSession' in navigator)) return;
+  const f=folders[curFolder]; const name=(f&&curItem>=0)?f.items[curItem].name:'未播放';
+  try{ navigator.mediaSession.metadata=new MediaMetadata({title:name, artist:'未央音频'}); }catch(e){}
+  navigator.mediaSession.playbackState = audio.paused ? 'paused' : 'playing';
+}
+function setMSPos(){
+  if(!('mediaSession' in navigator)) return;
+  try{ navigator.mediaSession.setPositionState({ duration: isFinite(audio.duration)?audio.duration:0, position: audio.currentTime||0, playbackRate: audio.playbackRate||1 }); }catch(e){}
+}
+if('mediaSession' in navigator){
+  navigator.mediaSession.setActionHandler('play', ()=>audio.play());
+  navigator.mediaSession.setActionHandler('pause', ()=>audio.pause());
+  navigator.mediaSession.setActionHandler('previoustrack', ()=>next());
+  navigator.mediaSession.setActionHandler('nexttrack', ()=>next());
+}
+
+// 启动：尝试复用上次选过的文件夹
+loadHandle().then(h=>{ if(h){ dirHandle=h; $('pick').style.display='none'; $('bar').style.display='block';
+  loadTree().then(restoreLast).catch(()=>{ $('pick').style.display='flex'; $('bar').style.display='none'; }); }
+}).catch(()=>{});
+</script>
+</body>
+</html>
