@@ -40,16 +40,21 @@ jobs:
       - name: Build debug APK (with diagnostics)
         run: |
           set -o pipefail
+          chmod +x ./gradlew || true
           {
             echo "=== ENV ==="
             echo "JAVA_HOME=$JAVA_HOME"
             java -version
             echo "ANDROID_HOME=$ANDROID_HOME"
             echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
+            echo "=== FILE INFO ==="
+            ls -la ./gradlew
+            file ./gradlew
+            head -c 40 ./gradlew | od -c | head -3
             echo "=== GRADLE VERSION ==="
-            ./gradlew --version --no-daemon
+            sh ./gradlew --version --no-daemon
             echo "=== BUILD ==="
-            ./gradlew assembleDebug --no-daemon --stacktrace
+            sh ./gradlew assembleDebug --no-daemon --stacktrace
           } 2>&1 | tee gradle.log
 
       - name: Report build error (push log)
