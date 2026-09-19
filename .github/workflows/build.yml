@@ -3,6 +3,9 @@ on:
   push:
     branches: [ main, master ]
   workflow_dispatch:
+permissions:
+  contents: write
+  issues: write
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -58,17 +61,17 @@ jobs:
           git config user.email "ci@github.com"
           git config user.name "CI Bot"
           git add -f build-error.log
-          git commit -m "build error log" && \
-          git push "https://x-access-token:${GH_TOKEN}@github.com/xhx-hl/AudioPlayerApp.git" HEAD:build-log --force || \
-          echo "build-error.log unchanged from previous run"
+          git commit -m "build error log"
+          git push "https://x-access-token:${GH_TOKEN}@github.com/xhx-hl/AudioPlayerApp.git" HEAD:build-log --force
 
       - name: Deliver APK via branch
         if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           cp app/build/outputs/apk/debug/app-debug.apk app-debug.apk
           git config user.email "ci@github.com"
           git config user.name "CI Bot"
           git add -f app-debug.apk
-          git commit -m "Deliver app-debug.apk" && \
-          git push "https://x-access-token:${{ github.token }}@github.com/xhx-hl/AudioPlayerApp.git" HEAD:apk --force || \
-          echo "apk unchanged"
+          git commit -m "Deliver app-debug.apk"
+          git push "https://x-access-token:${GH_TOKEN}@github.com/xhx-hl/AudioPlayerApp.git" HEAD:apk --force
