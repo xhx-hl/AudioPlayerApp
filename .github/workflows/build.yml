@@ -34,10 +34,32 @@ jobs:
       - name: Make gradlew executable
         run: chmod +x ./gradlew
 
-      - name: Build debug APK
-        run: ./gradlew assembleDebug --no-daemon
+      - name: Build debug APK (with diagnostics)
+        run: |
+          set -o pipefail
+          {
+            echo "=== ENV ==="
+            echo "JAVA_HOME=$JAVA_HOME"
+            java -version
+            echo "ANDROID_HOME=$ANDROID_HOME"
+            echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
+            echo "=== GRADLE VERSION ==="
+            ./gradlew --version --no-daemon
+            echo "=== BUILD ==="
+            ./gradlew assembleDebug --no-daemon --stacktrace
+          } 2>&1 | tee gradle.log
+
+      - name: Upload build log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gradle-failure-log
+          path: |
+            gradle.log
+            app/build/reports
 
       - name: Upload APK artifact
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: app-debug-apk
