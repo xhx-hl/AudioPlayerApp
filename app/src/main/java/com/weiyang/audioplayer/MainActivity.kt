@@ -77,7 +77,8 @@ class MainActivity : AppCompatActivity(), Player.Listener {
         binding.toolbar.title = "未央音频播放器"
 
         treeUri = prefs.getTreeUri()?.let { Uri.parse(it) }
-        speedIndex = speeds.indexOf(prefs.getSpeed()).let { if (it < 0) 2 else it }
+        val savedIdx = speeds.indexOfFirst { it == prefs.getSpeed() }
+        speedIndex = if (savedIdx < 0) 2 else savedIdx
 
         setupLists()
         setupControls()
