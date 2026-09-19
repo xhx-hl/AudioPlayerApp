@@ -49,29 +49,18 @@ jobs:
             ./gradlew assembleDebug --no-daemon --stacktrace
           } 2>&1 | tee gradle.log
 
-      - name: Report build error as issue
+      - name: Report build error (push log)
         if: failure()
         env:
           GH_TOKEN: ${{ github.token }}
-          RUN_ID: ${{ github.run_id }}
         run: |
-          python3 - <<'PY'
-          import os, json, urllib.request, urllib.error
-          token=os.environ['GH_TOKEN']; rid=os.environ['RUN_ID']
-          try:
-              log=open('gradle.log', encoding='utf-8', errors='ignore').read()
-          except Exception as e:
-              log="(no gradle.log) "+str(e)
-          body="Run "+rid+" failed.\n\n```\n"+log[-9000:]+"\n```"
-          data=json.dumps({"title":"CI build error "+rid,"body":body}).encode()
-          req=urllib.request.Request("https://api.github.com/repos/xhx-hl/AudioPlayerApp/issues",
-              data=data, headers={"Authorization":"Bearer "+token,"Accept":"application/vnd.github+json"}, method="POST")
-          try:
-              with urllib.request.urlopen(req, timeout=30) as r:
-                  j=json.loads(r.read()); print("issue", j.get("html_url"))
-          except urllib.error.HTTPError as e:
-              print("issue create failed", e.code, e.read().decode()[:200])
-          PY
+          cp gradle.log build-error.log
+          git config user.email "ci@github.com"
+          git config user.name "CI Bot"
+          git add -f build-error.log
+          git commit -m "build error log" && \
+          git push "https://x-access-token:${GH_TOKEN}@github.com/xhx-hl/AudioPlayerApp.git" HEAD:build-log --force || \
+          echo "build-error.log unchanged from previous run"
 
       - name: Deliver APK via branch
         if: success()
@@ -79,6 +68,7 @@ jobs:
           cp app/build/outputs/apk/debug/app-debug.apk app-debug.apk
           git config user.email "ci@github.com"
           git config user.name "CI Bot"
-          git add app-debug.apk
-          git commit -m "Deliver app-debug.apk" || echo "no change"
-          git push "https://x-access-token:${{ github.token }}@github.com/xhx-hl/AudioPlayerApp.git" HEAD:apk --force
+          git add -f app-debug.apk
+          git commit -m "Deliver app-debug.apk" && \
+          git push "https://x-access-token:${{ github.token }}@github.com/xhx-hl/AudioPlayerApp.git" HEAD:apk --force || \
+          echo "apk unchanged"
