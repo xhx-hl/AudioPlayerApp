@@ -290,8 +290,7 @@ class MainActivity : AppCompatActivity(), Player.Listener {
         binding.toolbar.setOnMenuItemClickListener { item ->
             when (item.itemId) {
                 R.id.menu_fav -> { showFavorites(); true }
-                R.id.menu_import_folder -> { importTree.launch(null); true }
-                R.id.menu_import_files -> { pickFiles.launch(arrayOf("audio/*")); true }
+                R.id.menu_import -> { showImportChooser(); true }
                 else -> false
             }
         }
@@ -395,6 +394,16 @@ class MainActivity : AppCompatActivity(), Player.Listener {
     }
 
     // ---------------- 收藏列表 ----------------
+    private fun showImportChooser() {
+        AlertDialog.Builder(this)
+            .setTitle("导入音频")
+            .setItems(arrayOf("导入文件夹", "导入文件")) { _, i ->
+                if (i == 0) importTree.launch(null)
+                else pickFiles.launch(arrayOf("audio/*"))
+            }
+            .show()
+    }
+
     private fun showFavorites() {
         val favs = prefs.getFavorites()
         if (favs.isEmpty()) {

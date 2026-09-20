@@ -50,11 +50,13 @@ class AudioAdapter(private val onClick: (AudioItem, Int) -> Unit) :
     private var data: List<AudioItem> = emptyList()
     private var playingPos = -1
     private var playingProgress = 0 // 0..100
+    private var playingHolder: VH? = null
 
     fun submit(list: List<AudioItem>) {
         data = list
         playingPos = -1
         playingProgress = 0
+        playingHolder = null
         notifyDataSetChanged()
     }
 
@@ -67,11 +69,10 @@ class AudioAdapter(private val onClick: (AudioItem, Int) -> Unit) :
         if (pos in data.indices) notifyItemChanged(pos)
     }
 
-    /** 刷新正在播放那一行的进度条（0..100）。 */
+    /** 直接更新正在播放那一行的进度条，不触发整行重绑，避免闪烁。 */
     fun setProgress(percent: Int) {
-        if (playingPos !in data.indices) return
         playingProgress = percent.coerceIn(0, 100)
-        notifyItemChanged(playingPos)
+        playingHolder?.b?.progress?.progress = playingProgress
     }
 
     class VH(val b: ItemAudioBinding) : RecyclerView.ViewHolder(b.root)
@@ -99,5 +100,10 @@ class AudioAdapter(private val onClick: (AudioItem, Int) -> Unit) :
             h.b.progress.visibility = View.GONE
         }
         h.b.root.setOnClickListener { onClick(item, i) }
+        playingHolder = if (isPlaying) h else null
+    }
+
+    override fun onViewRecycled(h: VH) {
+        if (playingHolder == h) playingHolder = null
     }
 }

@@ -6,11 +6,7 @@
         android:title="收藏"
         app:showAsAction="always" />
     <item
-        android:id="@+id/menu_import_folder"
-        android:title="导入文件夹"
-        app:showAsAction="never" />
-    <item
-        android:id="@+id/menu_import_files"
-        android:title="导入文件"
-        app:showAsAction="never" />
+        android:id="@+id/menu_import"
+        android:title="导入"
+        app:showAsAction="always" />
 </menu>
