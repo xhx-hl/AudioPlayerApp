@@ -37,6 +37,20 @@ jobs:
       - name: Make gradlew executable
         run: chmod +x ./gradlew
 
+      - name: Prepare signing key (from secret, or generate fallback)
+        env:
+          SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
+        run: |
+          if [ -n "$SIGNING_KEY" ]; then
+            echo "$SIGNING_KEY" | base64 -d > app/upload_keystore.p12
+            echo "using signing key from repo secret"
+          else
+            keytool -genkeypair -v -keystore app/upload_keystore.p12 -storetype PKCS12 \
+              -alias audioplayer -keyalg RSA -keysize 2048 -validity 10000 \
+              -storepass audioplayer -keypass audioplayer -dname "CN=AudioPlayer"
+            echo "no SIGNING_KEY secret; generated temporary key"
+          fi
+
       - name: Build debug APK (with diagnostics)
         run: |
           set -o pipefail
