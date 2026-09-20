@@ -11,6 +11,8 @@ import android.provider.OpenableColumns
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.view.Menu
+import android.view.MenuItem
 import android.widget.SeekBar
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
@@ -43,6 +45,7 @@ class MainActivity : AppCompatActivity(), Player.Listener {
     private var controller: MediaController? = null
     private var controllerFuture: ListenableFuture<MediaController>? = null
     private var playingIndex = -1
+    private var lastPlayingUri: String? = null
 
     private val speeds = floatArrayOf(0.5f, 0.75f, 1f, 1.25f, 1.5f, 2f)
     private var speedIndex = 2
@@ -242,7 +245,21 @@ class MainActivity : AppCompatActivity(), Player.Listener {
         val uri = mediaItem?.localConfiguration?.uri
         binding.btnFav.text =
             if (uri != null && prefs.isFavorite(uri.toString())) "★" else "☆"
+        // 自动跳到下一首 => 说明上一首已经播完，把它的进度重置，下次从头播
+        if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO) {
+            lastPlayingUri?.let { prefs.clearProgress(it) }
+        }
+        lastPlayingUri = uri?.toString()
         syncPlaying()
+    }
+
+    override fun onPlaybackStateChanged(playbackState: Int) {
+        // 顺序播放到最后一首播完（STATE_ENDED）=> 重置当前这条的进度
+        if (playbackState == Player.STATE_ENDED) {
+            controller?.currentMediaItem?.localConfiguration?.uri?.let {
+                prefs.clearProgress(it.toString())
+            }
+        }
     }
 
     override fun onIsPlayingChanged(isPlaying: Boolean) {
@@ -286,15 +303,6 @@ class MainActivity : AppCompatActivity(), Player.Listener {
 
     // ---------------- 按钮 ----------------
     private fun setupControls() {
-        binding.toolbar.inflateMenu(R.menu.main_menu)
-        binding.toolbar.setOnMenuItemClickListener { item ->
-            when (item.itemId) {
-                R.id.menu_fav -> { showFavorites(); true }
-                R.id.menu_import -> { showImportChooser(); true }
-                else -> false
-            }
-        }
-
         binding.btnPlay.setOnClickListener {
             controller?.let { if (it.isPlaying) it.pause() else it.play() }
         }
@@ -304,6 +312,8 @@ class MainActivity : AppCompatActivity(), Player.Listener {
         binding.btnRepeat.setOnClickListener { cycleRepeat() }
         binding.btnSleep.setOnClickListener { showSleepMenu() }
         binding.btnFav.setOnClickListener { toggleFav() }
+        // 常驻的「导入」按钮（不依赖工具栏菜单，保证看得见）
+        binding.btnImport.setOnClickListener { showImportChooser() }
 
         binding.seekBar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(s: SeekBar?, p: Int, fromUser: Boolean) {}
@@ -312,6 +322,18 @@ class MainActivity : AppCompatActivity(), Player.Listener {
                 controller?.seekTo((s?.progress?.toLong() ?: 0) * 1000)
             }
         })
+    }
+
+    // 顶栏菜单（收藏 / 导入）——用标准方式，避免菜单不显示
+    override fun onCreateOptionsMenu(menu: Menu): Boolean {
+        menuInflater.inflate(R.menu.main_menu, menu)
+        return true
+    }
+
+    override fun onOptionsItemSelected(item: MenuItem): Boolean = when (item.itemId) {
+        R.id.menu_fav -> { showFavorites(); true }
+        R.id.menu_import -> { showImportChooser(); true }
+        else -> super.onOptionsItemSelected(item)
     }
 
     private fun cycleSpeed() {
@@ -439,6 +461,8 @@ class MainActivity : AppCompatActivity(), Player.Listener {
     // ---------------- 进度保存与恢复 ----------------
     private fun saveCurrent() {
         controller?.let { c ->
+            // 已经播完的不再保存末尾位置，否则会把刚清零的进度又写回去
+            if (c.playbackState == Player.STATE_ENDED) return
             val uri = c.currentMediaItem?.localConfiguration?.uri ?: return
             val pos = c.currentPosition
             if (pos > 0) {

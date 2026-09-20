@@ -36,6 +36,9 @@ class ProgressStore(ctx: Context) {
 
     fun getProgress(uri: String): Long = sp.getLong("pos_$uri", 0L)
 
+    /** 音频播放完成后清掉它的进度，下次从头播放。 */
+    fun clearProgress(uri: String) = sp.edit().remove("pos_$uri").apply()
+
     // ---- 变速 ----
     fun saveSpeed(s: Float) = sp.edit().putFloat("speed", s).apply()
     fun getSpeed(): Float = sp.getFloat("speed", 1f)

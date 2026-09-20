@@ -74,6 +74,12 @@
                 android:textSize="12sp"
                 android:textColor="@color/teal"
                 android:paddingStart="8dp" />
+
+            <Button
+                android:id="@+id/btnImport"
+                style="@style/PlayerBtn"
+                android:textSize="16sp"
+                android:text="导入" />
         </LinearLayout>
 
         <LinearLayout
