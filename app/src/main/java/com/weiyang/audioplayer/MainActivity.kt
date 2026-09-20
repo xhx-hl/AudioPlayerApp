@@ -2,6 +2,7 @@ package com.weiyang.audioplayer
 
 import android.Manifest
 import android.content.ComponentName
+import android.app.Activity
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
@@ -12,6 +13,7 @@ import android.os.Looper
 import android.widget.SeekBar
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.result.contract.ActivityResultContract
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
@@ -76,7 +78,7 @@ class MainActivity : AppCompatActivity(), Player.Listener {
     }
 
     // 导入多个音频文件（合并进「导入」文件夹）
-    private val pickFiles = registerForActivityResult(ActivityResultContracts.OpenDocumentMultiple()) { uris ->
+    private val pickFiles = registerForActivityResult(OpenDocumentMultipleContract()) { uris ->
         if (uris.isNullOrEmpty()) return@registerForActivityResult
         uris.forEach { uri ->
             try {
@@ -534,5 +536,28 @@ class MainActivity : AppCompatActivity(), Player.Listener {
         controller?.removeListener(this)
         controllerFuture?.let { MediaController.releaseFuture(it) }
         super.onDestroy()
+    }
+}
+
+/** 一次选多个文档（部分 activity 版本没有 OpenDocumentMultiple，这里自己实现）。 */
+class OpenDocumentMultipleContract : ActivityResultContract<Array<String>, List<Uri>>() {
+    override fun createIntent(context: Context, input: Array<String>): Intent =
+        Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "*/*"
+            putExtra(Intent.EXTRA_MIME_TYPES, input)
+            putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
+        }
+
+    override fun parseResult(resultCode: Int, intent: Intent?): List<Uri> {
+        if (intent == null || resultCode != Activity.RESULT_OK) return emptyList()
+        val clip = intent.clipData
+        if (clip != null) {
+            val list = mutableListOf<Uri>()
+            for (i in 0 until clip.itemCount) list.add(clip.getItemAt(i).uri)
+            return list
+        }
+        val single = intent.data
+        return if (single != null) listOf(single) else emptyList()
     }
 }
