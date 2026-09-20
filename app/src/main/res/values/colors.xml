@@ -7,4 +7,7 @@
     <color name="text">#E0E0E0</color>
     <color name="folder_bg">#2A2A2A</color>
     <color name="folder_sel">#26A69A</color>
+    <color name="accent">#4DD0E1</color>
+    <color name="audio_bg">#1E1E1E</color>
+    <color name="audio_playing">#16383A</color>
 </resources>

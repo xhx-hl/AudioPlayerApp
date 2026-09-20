@@ -5,6 +5,7 @@ import android.content.ComponentName
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
+import android.provider.OpenableColumns
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -38,6 +39,7 @@ class MainActivity : AppCompatActivity(), Player.Listener {
     private var selectedFolder = 0
     private var controller: MediaController? = null
     private var controllerFuture: ListenableFuture<MediaController>? = null
+    private var playingIndex = -1
 
     private val speeds = floatArrayOf(0.5f, 0.75f, 1f, 1.25f, 1.5f, 2f)
     private var speedIndex = 2
@@ -65,6 +67,46 @@ class MainActivity : AppCompatActivity(), Player.Listener {
         } else {
             Toast.makeText(this, "未选择文件夹，无法播放音频", Toast.LENGTH_LONG).show()
         }
+    }
+
+    // 导入一个额外的文件夹（合并进列表）
+    private val importTree = registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+        if (uri != null) importFolder(uri)
+        else Toast.makeText(this, "未选择文件夹", Toast.LENGTH_SHORT).show()
+    }
+
+    // 导入多个音频文件（合并进「导入」文件夹）
+    private val pickFiles = registerForActivityResult(ActivityResultContracts.OpenDocumentMultiple()) { uris ->
+        if (uris.isNullOrEmpty()) return@registerForActivityResult
+        uris.forEach { uri ->
+            try {
+                contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            } catch (_: Exception) {
+            }
+        }
+        val items = uris.mapNotNull { uri ->
+            val name = getDisplayName(uri) ?: "音频"
+            if (isAudio(name)) AudioItem(name, uri, "导入") else null
+        }
+        if (items.isEmpty()) {
+            Toast.makeText(this, "选择的文件里没有音频", Toast.LENGTH_SHORT).show()
+            return@registerForActivityResult
+        }
+        val mutable = folders.toMutableList()
+        val existing = mutable.indexOfFirst { it.name == "导入" }
+        if (existing >= 0) {
+            val merged = (mutable[existing].items + items).distinctBy { it.uri.toString() }
+            mutable[existing] = Folder("导入", merged)
+        } else {
+            mutable.add(Folder("导入", items))
+        }
+        folders = mutable
+        folderAdapterRef.submit(folders, selectedFolder)
+        if (existing >= 0 && existing == selectedFolder) {
+            audioAdapterRef.submit(folders[selectedFolder].items)
+            syncPlaying()
+        }
+        Toast.makeText(this, "已导入 ${items.size} 个音频到「导入」", Toast.LENGTH_SHORT).show()
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -158,17 +200,26 @@ class MainActivity : AppCompatActivity(), Player.Listener {
         prefs.saveLastFolder(folders[index].name)
         folderAdapterRef.setSelected(index)
         audioAdapterRef.submit(folders[index].items)
+        syncPlaying()
     }
 
     // ---------------- 播放控制 ----------------
     private fun playFolderItem(folderIndex: Int, itemIndex: Int) {
         val folder = folders.getOrNull(folderIndex) ?: return
-        val items = folder.items.map { buildMediaItem(it) }
-        controller?.let { c ->
-            c.setMediaItems(items, itemIndex, 0L)
-            c.prepare()
-            c.play()
+        val item = folder.items.getOrNull(itemIndex) ?: return
+        val c = controller ?: return
+        // 点的是正在播放的那一条：直接暂停/继续，不打断进度
+        if (folderIndex == selectedFolder && itemIndex == playingIndex && c.isPlaying) {
+            c.pause()
+            return
         }
+        val items = folder.items.map { buildMediaItem(it) }
+        val start = prefs.getProgress(item.uri.toString()).coerceAtLeast(0L)
+        c.setMediaItems(items, itemIndex, start)
+        c.prepare()
+        c.play()
+        playingIndex = itemIndex
+        audioAdapterRef.setPlaying(itemIndex)
     }
 
     private fun buildMediaItem(item: AudioItem): MediaItem =
@@ -188,6 +239,7 @@ class MainActivity : AppCompatActivity(), Player.Listener {
         val uri = mediaItem?.localConfiguration?.uri
         binding.btnFav.text =
             if (uri != null && prefs.isFavorite(uri.toString())) "★" else "☆"
+        syncPlaying()
     }
 
     override fun onIsPlayingChanged(isPlaying: Boolean) {
@@ -213,6 +265,12 @@ class MainActivity : AppCompatActivity(), Player.Listener {
                 binding.seekBar.progress = (c.currentPosition / 1000).toInt()
                 binding.tvCur.text = fmt(c.currentPosition)
                 binding.tvDur.text = fmt(c.duration)
+                // 正在播放那一行上的进度条
+                val total = c.duration
+                if (total > 0) {
+                    val pct = ((c.currentPosition * 100) / total).toInt().coerceIn(0, 100)
+                    audioAdapterRef.setProgress(pct)
+                }
                 val now = System.currentTimeMillis()
                 if (now - lastSaved > 4000) {
                     saveCurrent()
@@ -229,6 +287,8 @@ class MainActivity : AppCompatActivity(), Player.Listener {
         binding.toolbar.setOnMenuItemClickListener { item ->
             when (item.itemId) {
                 R.id.menu_fav -> { showFavorites(); true }
+                R.id.menu_import_folder -> { importTree.launch(null); true }
+                R.id.menu_import_files -> { pickFiles.launch(arrayOf("audio/*")); true }
                 else -> false
             }
         }
@@ -368,25 +428,89 @@ class MainActivity : AppCompatActivity(), Player.Listener {
     private fun saveCurrent() {
         controller?.let { c ->
             val uri = c.currentMediaItem?.localConfiguration?.uri ?: return
-            if (c.currentPosition > 0) prefs.saveLast(uri.toString(), c.currentPosition)
+            val pos = c.currentPosition
+            if (pos > 0) {
+                // 每个文件单独存进度，用于断点续播
+                prefs.saveProgress(uri.toString(), pos)
+                // 同时记录"上次播放"，用于启动时自动恢复
+                prefs.saveLast(uri.toString(), pos)
+            }
         }
     }
 
     private fun maybeRestore() {
         if (restored) return
         if (controller == null || folders.isEmpty()) return
-        val (uri, pos) = prefs.getLast() ?: return
+        val (uri, _) = prefs.getLast() ?: return
         for (fi in folders.indices) {
             val idx = folders[fi].items.indexOfFirst { it.uri.toString() == uri }
             if (idx >= 0) {
                 showFolder(fi)
                 val items = folders[fi].items.map { buildMediaItem(it) }
+                val pos = prefs.getProgress(uri).coerceAtLeast(0L)
                 controller!!.setMediaItems(items, idx, pos)
                 controller!!.prepare()
                 restored = true
+                syncPlaying()
                 return
             }
         }
+    }
+
+    /** 根据当前控制器正在播放的音频，更新列表高亮（仅当它在当前文件夹时）。 */
+    private fun syncPlaying() {
+        val uri = controller?.currentMediaItem?.localConfiguration?.uri?.toString()
+        val idx = if (uri != null) {
+            folders.getOrNull(selectedFolder)?.items
+                ?.indexOfFirst { it.uri.toString() == uri } ?: -1
+        } else -1
+        playingIndex = idx
+        audioAdapterRef.setPlaying(idx)
+    }
+
+    /** 把选中的文件夹合并进列表（同名则合并去重）。 */
+    private fun importFolder(uri: Uri) {
+        try {
+            contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        } catch (_: Exception) {
+        }
+        val doc = DocumentFile.fromTreeUri(this, uri) ?: return
+        val items = doc.listFiles()
+            .filter { it.isFile && isAudio(it.name ?: "") }
+            .sortedBy { it.name?.lowercase() ?: "" }
+            .map { AudioItem(it.name ?: "音频", it.uri, doc.name ?: "导入") }
+        if (items.isEmpty()) {
+            Toast.makeText(this, "该文件夹里没有音频文件", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val folder = Folder(doc.name ?: "导入", items)
+        val mutable = folders.toMutableList()
+        val existing = mutable.indexOfFirst { it.name == folder.name }
+        if (existing >= 0) {
+            val merged = (mutable[existing].items + items).distinctBy { it.uri.toString() }
+            mutable[existing] = Folder(folder.name, merged)
+        } else {
+            mutable.add(folder)
+        }
+        folders = mutable
+        folderAdapterRef.submit(folders, selectedFolder)
+        if (existing >= 0 && existing == selectedFolder) {
+            audioAdapterRef.submit(folders[selectedFolder].items)
+            syncPlaying()
+        }
+        Toast.makeText(this, "已导入：${folder.name}（${items.size} 个）", Toast.LENGTH_SHORT).show()
+    }
+
+    /** 取文档 Uri 的显示文件名。 */
+    private fun getDisplayName(uri: Uri): String? {
+        var name: String? = null
+        contentResolver.query(uri, null, null, null, null)?.use { c ->
+            if (c.moveToFirst()) {
+                val idx = c.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                if (idx >= 0) name = c.getString(idx)
+            }
+        }
+        return name
     }
 
     // ---------------- 工具 ----------------
