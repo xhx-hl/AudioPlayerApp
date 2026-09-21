@@ -290,6 +290,12 @@ class MainActivity : AppCompatActivity(), Player.Listener {
                 if (total > 0) {
                     val pct = ((c.currentPosition * 100) / total).toInt().coerceIn(0, 100)
                     audioAdapterRef.setProgress(pct)
+                    // 播到接近结尾就视为"播完" -> 重置进度（不依赖切歌回调，最稳）
+                    if (c.currentPosition >= total - 1000) {
+                        c.currentMediaItem?.localConfiguration?.uri?.let {
+                            prefs.clearProgress(it.toString())
+                        }
+                    }
                 }
                 val now = System.currentTimeMillis()
                 if (now - lastSaved > 4000) {
@@ -461,10 +467,14 @@ class MainActivity : AppCompatActivity(), Player.Listener {
     // ---------------- 进度保存与恢复 ----------------
     private fun saveCurrent() {
         controller?.let { c ->
-            // 已经播完的不再保存末尾位置，否则会把刚清零的进度又写回去
-            if (c.playbackState == Player.STATE_ENDED) return
             val uri = c.currentMediaItem?.localConfiguration?.uri ?: return
             val pos = c.currentPosition
+            val dur = c.duration
+            // 已播完 / 已到接近结尾：不保存末尾位置，改为清空进度（下次从头播）
+            if (c.playbackState == Player.STATE_ENDED || (dur > 0 && pos >= dur - 1000)) {
+                prefs.clearProgress(uri.toString())
+                return
+            }
             if (pos > 0) {
                 // 每个文件单独存进度，用于断点续播
                 prefs.saveProgress(uri.toString(), pos)
