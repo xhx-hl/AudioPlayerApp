@@ -314,12 +314,14 @@ class MainActivity : AppCompatActivity(), Player.Listener {
         }
         binding.btnPrev.setOnClickListener { controller?.seekToPrevious() }
         binding.btnNext.setOnClickListener { controller?.seekToNext() }
-        binding.btnSpeed.setOnClickListener { cycleSpeed() }
+        binding.btnSpeed.setOnClickListener { showSpeedMenu() }
         binding.btnRepeat.setOnClickListener { cycleRepeat() }
         binding.btnSleep.setOnClickListener { showSleepMenu() }
         binding.btnFav.setOnClickListener { toggleFav() }
         // 常驻的「导入」按钮（不依赖工具栏菜单，保证看得见）
         binding.btnImport.setOnClickListener { showImportChooser() }
+        // 倍速按钮与相邻按钮保持同一个颜色（避免被主题的按钮 tint 影响而变色）
+        binding.btnSpeed.setTextColor(android.graphics.Color.WHITE)
 
         binding.seekBar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(s: SeekBar?, p: Int, fromUser: Boolean) {}
@@ -342,11 +344,18 @@ class MainActivity : AppCompatActivity(), Player.Listener {
         else -> super.onOptionsItemSelected(item)
     }
 
-    private fun cycleSpeed() {
-        speedIndex = (speedIndex + 1) % speeds.size
-        val sp = speeds[speedIndex]
-        controller?.playbackParameters = PlaybackParameters(sp)
-        prefs.saveSpeed(sp)
+    private fun showSpeedMenu() {
+        val labels = speeds.map { formatSpeed(it) }.toTypedArray()
+        AlertDialog.Builder(this)
+            .setTitle("播放速度")
+            .setSingleChoiceItems(labels, speedIndex) { d, i ->
+                speedIndex = i
+                val sp = speeds[i]
+                controller?.playbackParameters = PlaybackParameters(sp)
+                prefs.saveSpeed(sp)
+                d.dismiss()
+            }
+            .show()
     }
 
     private fun cycleRepeat() {
