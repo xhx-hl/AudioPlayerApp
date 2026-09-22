@@ -55,7 +55,8 @@ class AudioAdapter(private val onClick: (AudioItem, Int) -> Unit) :
     fun submit(list: List<AudioItem>) {
         data = list
         playingPos = -1
-        playingProgress = 0
+        // 注意：不要清零 playingProgress —— 切换文件夹时会重建列表，
+        // 若清零则播放行重新绑定后进度条会显示 0（且下面 holder 机制失效会一直卡 0）。
         playingHolder = null
         notifyDataSetChanged()
     }
@@ -100,7 +101,9 @@ class AudioAdapter(private val onClick: (AudioItem, Int) -> Unit) :
             h.b.progress.visibility = View.GONE
         }
         h.b.root.setOnClickListener { onClick(item, i) }
-        playingHolder = if (isPlaying) h else null
+        // 只在"播放行"绑定时记录它的 holder；非播放行不要把它置空，
+        // 否则整表重建后 holder 变 null，进度条就无法被持续刷新（会卡住/变 0）。
+        if (isPlaying) playingHolder = h
     }
 
     override fun onViewRecycled(h: VH) {
