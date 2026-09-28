@@ -122,7 +122,7 @@ class MainActivity : AppCompatActivity(), Player.Listener {
 
         prefs = ProgressStore(this)
         setSupportActionBar(binding.toolbar)
-        binding.toolbar.title = "未央音频播放器"
+        binding.toolbar.title = "熊皓轩的播放器"
 
         treeUri = prefs.getTreeUri()?.let { Uri.parse(it) }
         val savedIdx = speeds.indexOfFirst { it == prefs.getSpeed() }

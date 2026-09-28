@@ -13,7 +13,7 @@
         android:allowBackup="true"
         android:icon="@drawable/ic_launcher"
         android:roundIcon="@drawable/ic_launcher"
-        android:label="未央音频"
+        android:label="熊皓轩的播放器"
         android:supportsRtl="true"
         android:theme="@style/Theme.AudioPlayer"
         tools:targetApi="34">
